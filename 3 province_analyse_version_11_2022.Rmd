@@ -1,0 +1,1340 @@
+---
+html_document: default
+author: "Data officer"
+date: "`r format(Sys.Date(), "%d %B %Y")`"
+output:
+  pdf_document:
+    citation_package: biblatex
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 7
+    latex_engine: xelatex
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '4'
+geometry: left=2cm, right=2cm, top=2.5cm, bottom=2cm
+header-includes:
+- \usepackage{fancyhdr}
+- \usepackage[utf8]{inputenc}
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \usepackage{xcolor}
+- \usepackage[nottoc,numbib]{tocbibind}
+- \usepackage{graphicx}
+- \usepackage{caption}
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{multicol}
+- \usepackage{geometry}
+title: "Procedure to analyse monthly HSM data"
+link-citations: yes
+mainfont: Arial Narrow
+fontsize: 11pt
+subtitle: Democratic Republic of Congo
+bibliography: Citation.bib
+word_document: default
+---
+
+\definecolor{gray}{RGB}{88, 88, 90}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\includegraphics[height=0.8cm]{Logo_Reach_RGB_1.jpg}}
+\lfoot{PSO : Gestion de données – Suivi de la veille humanitaire}
+\rfoot{\thepage}
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(tinytex.verbose = TRUE)
+options(kableExtra.latex.load_packages =FALSE)
+```
+
+
+\section{Prerequisite}
+
+\setcounter{page}{4}
+
+This document details each steps of the code used to perform monthly HSM analysis. In addition, the Standard Of Procedure "REACH_HSM_SOP_RC1-5_20102020.docx" gives more information about the process and the Terms of References details the goals and methodology.
+
+There are four key parts in this procedure : the preparation of the framework, the aggregation, the analysis and the formatting process.
+
+
+\section{Preparation of the framework}
+
+The first step is to prepare the framework by installing required software and packages, as well as updating and collecting input files.
+
+\subsection{Required softwares}
+
+Required softwares and packages are :
+
+* R : https://cran.rstudio.com/
+* Rtools : https://cran.r-project.org/bin/windows/Rtools/
+* R Studio : https://rstudio.com/products/rstudio/download/
+
+The package below should be installed :
+
+```{r, echo=T, warning=F, message=F, eval=F}
+#install.packages("rmarkdown")
+```
+
+* latexpdf : installation should be process in R Studio console with R 32 bits version
+
+```{r, echo=T, warning=F, message=F, eval=F}
+#install.packages("latexpdf")
+```
+
+* MikTex : https://miktex.org/download
+
+You need to choose a https mirror otherwise donwload will fail.
+
+* Kobo : https://kobo.humanitarianresponse.info/accounts/login/?next=/#/
+An access to Kobo is usefull to download files and test the new version of the script with these.
+
+
+\subsection{Librairies}
+
+The following libraries are used along the script, you have to install them before with the install.packages() function : 
+
+
+
+```{r, echo=T, warning=F, message=F}
+library(knitr)
+library(kableExtra)
+library(readxl)
+library(magrittr)
+library(dplyr)
+library(tibble)
+library(readxl)
+library(data.table)
+library(forcats)
+library(lubridate)
+library(testthat)
+#devtools::install_github("ellieallien/koboquest")
+library(koboquest)
+library(stringi)
+library(stringr)
+library(tidyr)
+library(purrr)
+'%!in%' = Negate('%in%')
+```
+
+\subsection{Input files to update}
+
+The second step is to copy and paste the last month folder and to rename it manually with the month of analysis. We also store the month of the data collection for a later use :
+
+```{r, echo=T, warning=F, message=F}
+month_collection <- "202212"
+titre_projet<- "Ituri decembre"
+```
+
+
+\subsubsection{REACH\_DRC\_HSM\_AAF\_AAAAMM.Rmd}
+
+This file is the present script. It is used to run the analysis and formatting but also to generate the procedure document. It contains the code where modifications should be done related to survey evolution.
+
+\subsubsection{REACH\_DRC\_HSM\_Aggregation\_IDDformatting\_AAAAMM.xls}
+
+This file stores question labels and names as well as aggregation and formatting functions to use for each variable. Column "name_kobo" should be updated with the header of a clean dataset but column "name_R" should be updated with the header of the dataset extract from kobo with xml header. Then, a vertical look up should be performed to retrieve "data_by_ki", "function_agg", "prov_multinom", "prov_top3_zs". For new variable, you have to fill these columns as following :
+
+* data_by_ki : specify "data_by_ki" in the cell if this variable should be reported at KI level,
+* function_agg : specify the aggregation function to use for aggregating KI data to a locality level (see aggregation section for details),
+* prov_multinom and prov_top3_zs : specify the formatting function to use for formatting data for InDesign merge (see formatting section for details)
+
+When this file is completed (don't forget the index column), you can import it with the code below :
+
+```{r, echo=T, warning=F, message=F}
+NAMES_DT <- paste0("input/others/REACH_DRC_HSM_Aggregation_IDDformatting_Ituri.xlsx")
+NAMES_DT = read_excel(NAMES_DT)
+NAMES_DT$index<- as.numeric(NAMES_DT$index)
+NAMES_DT = as.data.table(NAMES_DT)[order(index)]
+
+#on assure que pour le variables _autre (text) on a pas d'aggregation, sinon ca peux poser un probleme aprés
+NAMES_DT[grepl("\\_autre",NAMES_DT$var_kobo)]$function_agg<- NA
+NAMES_DT[grepl("\\_autre",NAMES_DT$var_kobo)]$data_by_ki<- NA
+NAMES_DT[grepl("\\_autre",NAMES_DT$var_kobo)]$prov_multinom<- NA
+NAMES_DT[grepl("\\_autre",NAMES_DT$var_kobo)]$prov_top3_zs<- NA
+```
+
+
+\subsubsection{REACH\_DRC\_HSM\_Couverture.csv}
+
+This file stores the corevage status of health areas (Zone de santé) during the investigation. It should be updated each month with the new values in the last column :
+
+```{r, echo=T, warning=F, message=F}
+ZS <- read_excel("input/others/REACH_DRC_HSM_Couverture_novembre_Ituri.xlsx")
+
+cover_status = rev(names(ZS))[1]
+
+if(any(ZS$province%in%c("Nord-Kivu","Sud-Kivu", "Tanganyika","Ituri")) == F){stop(
+  "C'est la première fois que nous analysons l'une des provinces couvertes, ou l'une d'entre elles n'était pas bien écrite. 
+  Dans le premier cas, ajouter l'eqiuvalent pour la nouvelle province au bloc de la ligne 815. 
+  Dans le second, corrigez l'orthographe"
+)}
+
+```
+
+\subsubsection{REACH\_DRC\_HSM\_Labels\_R\_to\_InDesign\_AAAAMM.xls}
+
+As text in the data is not always appropriated for InDesign fact sheets, we use a table of correspondence which stores the text modifications to apply. When reported variables are added or level labels change, this file should be updated : 
+
+```{r, echo=T, warning=F, message=F}
+TXT_LAB <- "input/others/REACH_DRC_HSM_Labels_R_to_InDesign_Ituri_112022.xlsx"
+```
+
+
+\subsection{Input files to delete and replace by their new version}
+
+\subsubsection{REACH\_DRC\_HSM\_CleanedDataset\_AAAAMM\_GIS}
+
+The cleaned datasets have to be validated by the GIS officer and the HQ. There is one dataset by province.
+
+Warnings : two different localities of different heath areas can have the same name.
+
+
+```{r, echo=T, warning=F, message=F}
+CLEANED_DT <- c( "input/data/DRC2003_HSM_Data_Cleaning_HSM_DRC_202211_ITURI__npi_Validated_GISedited.xlsm"
+  )
+
+KI_CLEAN_DT <- lapply(CLEANED_DT, function(x){
+  as.data.table(read_excel(x, sheet = "Clean Data"))
+  })
+
+KI_CLEAN_DT = rbindlist(KI_CLEAN_DT) %>% as.data.frame
+
+
+```
+
+As we have long label names with special characters in cleaned data, we replace them by new names :
+
+```{r, echo=T, warning=F, message=F}
+#check correspondence
+## Check that all the names in KI_CLEAN_DT are in the names_DT dataset
+length(NAMES_DT$name_R)==length(names(KI_CLEAN_DT))
+
+# voyons visuellement où se trouve la différence
+max_ln <- max(c(length(NAMES_DT$name_kobo), length(names(KI_CLEAN_DT))))
+difference_check<- data.frame(label_fichier_aggregation = c(NAMES_DT$name_kobo,rep(NA, max_ln - length(NAMES_DT$name_kobo))),
+                      name_BDD = c(names(KI_CLEAN_DT),rep(NA, max_ln - length(names(KI_CLEAN_DT)))))
+
+difference_check<-difference_check%>%mutate(difference = ifelse(label_fichier_aggregation==name_BDD , "NO", "OUI"))
+view(difference_check)
+
+if(length(filter(difference_check, difference %in%c("OUI"))$difference)>0){
+
+
+  stop("Il y a une différence entre les titres des colonnes de la BDD et la colonne name_kobo dans le document d'agrégation. Cela peut être dû aux colonnes ajoutées ou supprimées par la suite dans la BDD originale.
+
+       si des colonnes ont été supprimées de la BDD, rappelez-vous que cela ne doit pas être fait. Les colonnes contenant le nom du CI, son numéro de téléphone, etc. doivent également être conservées, et seules les valeurs effacées")
+}else{ "c'est tout bien avec le fichier d'aggregation"}
+```
+
+```{r, echo=T, warning=F, message=F}
+names(KI_CLEAN_DT) = c(NAMES_DT$name_R) 
+
+KI_CLEAN_DT$C_zone_sante %<>% str_to_title
+KI_CLEAN_DT$C_nom_localite_final %<>% str_to_title
+```
+
+
+\subsubsection{REACH\_DRC\_HSM\_Kobo\_202011}
+
+The Kobo file contains two interesting sheets : "survey" and "choices". The first one stores the labels and names of the questionnaire as well as the type of question (select one or select multiple), the name of the choices list and skip logic. The second one stores the choices list with all names and labels levels. We import kobo "survey" and "choices" sheets to relabel levels in a next step :
+
+```{r, echo=T, warning=F, message=F}
+kobofile <- "input/others/Questionnaire Ituri novembre.xlsx"
+
+questions = read_excel(kobofile, sheet = "survey")
+questions = as.data.table(questions)
+
+choices = read_excel(kobofile, sheet = "choices")
+choices = as.data.frame(choices)
+```
+
+We conserve only unique sets of choices (presence of duplicates but don't know why) :
+
+```{r, echo=T, warning=F, message=F}
+choices2 = unique(choices[,1:3])
+choices2 %<>% as.data.frame(stringsAsFactors = FALSE)
+
+## Test that everything is good with questionnaire loading 
+questionnaire <- load_questionnaire(KI_CLEAN_DT, questions, choices2)
+#warnings()
+
+# Change the labels (used for data cleaning) to names 
+
+get_choice_names<- function(x, data, choices) {
+  y <- data[[x]]
+       if(questionnaire$question_is_categorical(x)){
+        choices_rows <- match(y, choices$label)
+        labels <- choices_rows
+        labels[!is.na(choices_rows)] <- choices[choices_rows[!is.na(choices_rows)],
+        "name"]
+        labels[is.na(labels)] <- y[is.na(labels)]
+        return(labels)
+       }
+  names(y) <- x
+  return(as.vector(y))
+}
+
+to_names <- lapply(names(KI_CLEAN_DT), function(x){
+  return(get_choice_names(x = x, data = KI_CLEAN_DT, choices = choices2))}) %>% do.call(cbind,.) %>% as.data.frame
+
+names(to_names) <- names(KI_CLEAN_DT)
+#for some reason we have duplicate_columns
+to_names<- to_names[,!duplicated(names(to_names))==T]
+
+# on export KI_clean in names
+writexl::write_xlsx(to_names, "input/data/data_in_names.xlsx")
+```
+
+
+\subsection{Output files to delete}
+
+Output files of the last month should be deleted :
+
+* REACH_DRC_HSM_Aggregated_SK_Tanganyika_YYYYMM.csv,
+* REACH_DRC_HSM_Analysed_YYYYMM.csv,
+* REACH_DRC_HSM_Analysed_all_province_YYYYMM.csv,
+* REACH_DRC_HSM_InDesign_province_YYYYMM.csv
+
+Their new names are specified below :
+
+```{r, echo=T, warning=F, message=F}
+AGGREGATED_DATASET <- paste("output/REACH_DRC_HSM_Aggregated",titre_projet,".xlsx")
+
+ANALYSED_ZS <- paste("output/REACH_DRC_HSM_Analysed_",titre_projet,".xlsx")
+
+ANALYSED_FULL_P <- paste("output/REACH_DRC_HSM_Analysed_all_province_",titre_projet,".xlsx")
+
+INDESIGN_P <- paste("output/REACH_DRC_HSM_InDesign_province_",titre_projet,".csv", sep="")
+
+
+
+```
+
+\pagebreak
+
+\section{Aggregation process}
+
+
+\subsection{Aggregation of KI cleaned data}
+
+We aggregate the selected columns following the logic of each function:
+
+```{r, echo=T, warning=F, message=F}
+source("functions/aok_functions_GB.R")
+
+KI_CLEAN_DT <- as.data.table(to_names%>%mutate(concatenation=paste0(C_province,"*",C_zone_sante,"*",C_nom_localite_final)))
+
+KI_CLEAN_DT$`_uuid` = as.character(KI_CLEAN_DT$`_uuid`)
+
+# Recuperer les noms de fonctions qui sont dans le fichier de correspondance
+fun.to.run = levels(factor(NAMES_DT$function_agg[!(NAMES_DT$function_agg %in% c("aok_femme", "aok_femme_true", "aok_femme_secu_exclu", "aok_femme_false"))]))
+
+aggregate_by_aok_function <- function(fun.to.run, KI_dataset){
+  
+  aggregated_dataset <- lapply(fun.to.run, function(x){
+  
+  KI_dataset[, lapply(.SD, eval(parse(text = x))),
+              
+              by = .(C_province, C_zone_sante, C_nom_localite_final),
+              
+              .SDcols = c(NAMES_DT %>% filter(function_agg == x) %>% pull(name_R))]
+  })
+  return(aggregated_dataset)
+}
+
+
+# Pour chaque variable de la base de données, executer la fonction specifique selon la definition de fichier de correspondance.
+LOC_AGG_DT_full = aggregate_by_aok_function(fun.to.run, KI_CLEAN_DT)
+```
+
+Merge all the list elements into one database :
+
+```{r, echo=T, warning=F, message=F}
+# Joindre colonne après colonne sur base de la province, zone de santé et localité, car chaque variable a été aggregée par ces 3 critères.
+a = LOC_AGG_DT_full[[1]]
+
+for(i in 2:length(LOC_AGG_DT_full)){
+  a = LOC_AGG_DT_full[[i]][a, on = c("C_province", "C_zone_sante", "C_nom_localite_final")]
+}
+
+LOC_AGG_DT = a
+```
+
+POUR LA PARTIE AOK_FEMME LES FONCTIONS SONT DIFFERENT (plus rustique) DONC ON PROCEDE COMME CA
+
+```{r, echo=T, warning=F, message=F}
+## POUR LA PARTIE AOK_FEMME LES FONCTIONS SONT DIFFERENT (plus rustique) DONC ON PROCEDE COMME CA
+source("functions/aok_femme_functions_new.R")
+
+########### aggregation aok_femme
+var_aok_femme<- c(NAMES_DT %>% filter(function_agg == "aok_femme") %>% pull(name_R))
+if(length(var_aok_femme)>0){
+var_aok_femme<- var_aok_femme[var_aok_femme%in%names(KI_CLEAN_DT)]
+aggregated_dataset_femme<- aok_femme_new_group_mult(KI_CLEAN_DT, A_sexe, "femme", var_aok_femme, concatenation)%>%
+  pivot_longer(cols=c(-variables),names_to="concatenation")%>%
+  pivot_wider(names_from=c(variables))
+#let's reseparate the variable concatenation and add it to main aggregated dataset
+aggregated_dataset_femme<- separate(data = aggregated_dataset_femme, col = "concatenation", into = c("C_province", "C_zone_sante","C_nom_localite_final"), sep = "\\*")
+LOC_AGG_DT = LOC_AGG_DT%>%left_join(aggregated_dataset_femme, by=c("C_province", "C_zone_sante", "C_nom_localite_final"))
+
+}else{print("pas de variable a aggreger avec fonctions aok_femme ")}
+
+#########aggregation aok_femme_true
+var_aok_femme_true<- c(NAMES_DT %>% filter(function_agg == "aok_femme_true") %>% pull(name_R))
+if(length(var_aok_femme_true)>0){
+var_aok_femme_true<- var_aok_femme_true[var_aok_femme_true%in%names(KI_CLEAN_DT)]
+aggregated_dataset_femme_true<- aok_femme_true_new_group_mult(KI_CLEAN_DT, A_sexe, "femme", var_aok_femme_true, concatenation)%>%
+  pivot_longer(cols=c(-variables),names_to="concatenation")%>%
+  pivot_wider(names_from=c(variables))
+#let's reseparate the variable concatenation and add it to main aggregated dataset
+aggregated_dataset_femme_true<- separate(data = aggregated_dataset_femme_true, col = "concatenation", into = c("C_province", "C_zone_sante","C_nom_localite_final"), sep = "\\*")
+LOC_AGG_DT = LOC_AGG_DT%>%left_join(aggregated_dataset_femme_true, by=c("C_province", "C_zone_sante", "C_nom_localite_final"))
+}else{print("pas de variable a aggreger avec fonctions aok_femme_true ")}
+
+####################montrer si la function apparaitre dans le le IDD formatting
+# ###########aggregation femme false
+var_aok_femme_false<- c(NAMES_DT %>% filter(function_agg == "aok_femme_false") %>% pull(name_R))
+if(length(var_aok_femme_false)>0){
+var_aok_femme_false<- var_aok_femme_false[var_aok_femme_false%in%names(KI_CLEAN_DT)]
+aggregated_dataset_femme_false<- aok_femme_false_new_group_mult(KI_CLEAN_DT, A_sexe, "femme", var_aok_femme_false, concatenation)%>%
+  pivot_longer(cols=c(-variables),names_to="concatenation")%>%
+  pivot_wider(names_from=c(variables))
+#let's reseparate the variable concatenation and add it to main aggregated dataset
+aggregated_dataset_femme_false<- separate(data = aggregated_dataset_femme_false, col = "concatenation", into = c("C_province", "C_zone_sante","C_nom_localite_final"), sep = "\\*")
+LOC_AGG_DT = LOC_AGG_DT%>%left_join(aggregated_dataset_femme_false, by=c("C_province", "C_zone_sante", "C_nom_localite_final"))
+}else{print("pas de variable a aggreger avec fonctions aok_femme_false ")}
+
+#################aggregation femme exclu
+var_aok_femme_exclu<- c(NAMES_DT %>% filter(function_agg == "aok_femme_exclu") %>% pull(name_R))
+if(length(var_aok_femme_exclu)>0){
+var_aok_femme_exclu<- var_aok_femme_exclu[var_aok_femme_exclu%in%names(KI_CLEAN_DT)]
+aggregated_dataset_femme_exclu<- aok_femme_exclu_new_group_mult(KI_CLEAN_DT, A_sexe, "femme", var_aok_femme_exclu, concatenation)%>%
+  pivot_longer(cols=c(-variables),names_to="concatenation")%>%
+  pivot_wider(names_from=c(variables))
+#let's reseparate the variable concatenation and add it to main aggregated dataset
+aggregated_dataset_femme_exclu<- separate(data = aggregated_dataset_femme_exclu, col = "concatenation", into = c("C_province", "C_zone_sante","C_nom_localite_final"), sep = "\\*")
+LOC_AGG_DT = LOC_AGG_DT%>%left_join(aggregated_dataset_femme_exclu, by=c("C_province", "C_zone_sante", "C_nom_localite_final"))
+}else{print("pas de variable a aggreger avec fonctions aok_femme_exclu ")}
+```
+
+Rearrange the columns in our database in the same order than the original file :
+
+```{r, echo=T, warning=F, message=F}
+# Arranger les colonnes qui ont été jointes par rapport à la forme initiale des noms de variables dans la base de données
+LOC_AGG_DT <- LOC_AGG_DT %>% select(order(match(names(LOC_AGG_DT), names(KI_CLEAN_DT))))
+```
+
+\subsection{Loops aggregation}
+
+Loops are prepared in this section, one subsection per loop. The treatment process is always the same and transform and/or aggregate the loop to retrieve the granularity of the aggregated dataset. Merges of refined loops with aggregated dataset are run at the end of the section. Skip logic treatment will be processed in a next section.
+
+\subsubsection{Origines of pdi loop}
+
+Target indicator : 3 principales ZS d'origine des PDIs au cours du mois précédent, en % de localités évaluées.
+
+```{r, echo=T, warning=F, message=F}
+# Lecture de la loop de l'origine de la population
+LOOP_LOC_PDI = lapply(CLEANED_DT, function(x){
+  read_excel(x, sheet = "origine_pdi_localite", col_types = "text")
+  })
+
+LOOP_LOC_PDI = rbindlist(LOOP_LOC_PDI)
+```
+
+Subset and rename useful columns :
+
+```{r, echo=T, warning=F, message=F}
+
+LOOP_LOC_PDI = LOOP_LOC_PDI[,c("0.3.10) Dans quelle Province est située la localité?", "0.3.11) Dans quelle Zone de santé est située la localité?", "_submission__uuid")] 
+names(LOOP_LOC_PDI) = c("D3_pdi_prov", "D3_pdi_zs","_uuid")
+
+```
+
+Merge dpi loop with KI cleaned data on _id to recover host C_province, C_zone_sante and C_nom_localite_final :
+
+```{r, echo=T, warning=F, message=F}
+
+LOOP_LOC_PDI = KI_CLEAN_DT[,.(C_province, C_zone_sante, C_nom_localite_final,`_uuid`)][LOOP_LOC_PDI, on="_uuid", nomatch=NULL]
+
+```
+
+We rearrange data to have one row by C_province, C_zone_sante and C_nom_localite_final and ensure the same granularity as LOC_AGG_DT. If only one KI mentioned a ZS of origin, TRUE is returned at the locality level for this ZS. 
+
+```{r, echo=T, warning=F, message=F}
+LOOP_LOC_PDI = dcast(LOOP_LOC_PDI,
+                     C_province + C_zone_sante + C_nom_localite_final ~ D3_pdi_zs,
+                     value.var = "D3_pdi_zs",
+                     fun.aggregate = function(x){any(!is.na(x))})
+
+names(LOOP_LOC_PDI)[-c(1:3)] = paste("D3_pdi_zs", names(LOOP_LOC_PDI)[-c(1:3)], sep="_")
+```
+
+
+\subsubsection{Merge aggregated loops with aggregated data}
+
+```{r, echo=T, warning=F, message=F}
+# Jointure entre la base de données aggregée initiale avec la abse de données aggrégée de la loop de l'origine de PDI qui a été aggrégé par KI par aok_mode
+LOC_AGG_DT = LOOP_LOC_PDI[LOC_AGG_DT, on = c("C_province", "C_zone_sante", "C_nom_localite_final")]
+```
+
+\subsection{Adding additional variables}
+
+We compute and merge the number of KI per locality :
+
+```{r, echo=T, warning=F, message=F}
+n.ki = KI_CLEAN_DT[, .(B_ki_coverage = .N),
+                by = .(C_province, C_zone_sante, C_nom_localite_final)]
+
+LOC_AGG_DT = n.ki[LOC_AGG_DT, on = c("C_province", "C_zone_sante", "C_nom_localite_final")]
+```
+
+And add the month of the investigation :
+
+```{r, echo=T, warning=F, message=F}
+LOC_AGG_DT[, month_collection := month_collection]
+
+
+```
+
+
+\subsection{Skip logic treatment}
+
+#version 11-2022
+#on utilise la colonne condition_SL sdu fichier d'aggregation pour indiquer dans quels situation le SL doit remplacer le valeur, et le valuer devrait passer automatiquement (si ca ne passe pas c'est a cause d'un erreur dans l'ecriture dans la colonne condition_SL)
+```{r, echo=T, warning=F, message=F}
+#imprimer ici la version d'aggregation avant du traitement SL, de cette faison on peux facilment faire des verifications
+writexl::write_xlsx(LOC_AGG_DT, "output/aggregation avant traitement SL.xlsx")
+
+#on filtre seulement le cas ou il ya les conditions,et seulement pour les variables aggregé
+logical_list_check<- filter(NAMES_DT, !is.na(condition_SL), !is.na(function_agg))
+#on parse les conditions et on applique directement
+for(i in 1:nrow(logical_list_check)){
+  LOC_AGG_DT<- LOC_AGG_DT %>%mutate(!!sym(logical_list_check$name_R[i]) := ifelse(eval(parse(text = logical_list_check$condition_SL[i])), !!sym(logical_list_check$name_R[i]), "SL"))
+}
+```
+
+\subsubsection{D. Population}
+
+```{r, echo=T, warning=F, message=F}
+a = names(LOOP_LOC_PDI[,-c("C_province", "C_zone_sante", "C_nom_localite_final")])
+for(i in a){
+  LOC_AGG_DT[[i]][LOC_AGG_DT$D1_groupe_population_present_pdi != "oui" ] <- "SL"
+}
+```
+
+ ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## 
+\section{formattation creations nouvelle variables}
+
+\subsection{Retrieve level labels from Kobo}
+
+In this section we reattribute missing levels from Kobo because not all levels are in the LOC_AGG_DT. We first convert variables as factors and drop skip logic and missing levels :
+```{r, echo=T, warning=F, message=F}
+#sometimes this section doenst work, but if we export and reimport the same file it solves the problem for some reason
+# openxlsx::write.xlsx(LOC_AGG_DT,"functions/bb.xlsx")
+# bb <- readxl::read_excel("functions/bb.xlsx")
+# LOC_AGG_DT<- bb
+
+#on continue
+get_choice_labels<- function(x, data, choices) {
+  y <- data[[x]]
+       if(questionnaire$question_is_categorical(x)){
+        choices_rows <- match(y, choices$name)
+        labels <- choices_rows
+        labels[!is.na(choices_rows)] <- choices[choices_rows[!is.na(choices_rows)],
+        "label"]
+        labels[is.na(labels)] <- y[is.na(labels)]
+        return(labels)
+       }
+  names(y) <- x
+  return(y)
+}
+
+to_labels <- lapply(names(LOC_AGG_DT), function(x){
+  return(get_choice_labels(x = x, data = LOC_AGG_DT, choices = choices2))}) %>% do.call(cbind,.) %>% as.data.frame
+
+
+colnames(to_labels) <- names(LOC_AGG_DT)
+LOC_AGG_DT<- to_labels %>% as.data.table
+ # LOC_AGG_DT = LOC_AGG_DT[,lapply(names(LOC_AGG_DT), factor)]
+ LOC_AGG_DT = LOC_AGG_DT[,lapply(.SD, factor, exclude=c("SL", ""))]
+```
+
+Get list levels from Kobo for variable which are select_one and present in the LOC_AGG_DT :
+
+```{r, echo=T, warning=F, message=F}
+questions$select = sapply(strsplit(questions$type, " "), function(x){x[1]})
+
+questions$listname <-sapply(strsplit(questions$type, " "), function(x){x[2]})
+
+levels.lab = questions[select == "select_one", .(listname, name)]
+```
+
+Get list levels :
+
+```{r, echo=T, warning=F, message=F}
+levels.lab_to_w = NAMES_DT %>% select(name_kobo, name_R)
+
+levels.lab <- levels.lab_to_w %>% filter(name_R %in% levels.lab$name)
+
+levels.lab <- levels.lab %>% filter(name_R %in% names(LOC_AGG_DT))
+
+levels.lab <- as.data.table(levels.lab)
+LOC_AGG_DT <- as.data.table(LOC_AGG_DT)
+choices <- as.data.table(choices2)
+```
+
+
+Expand levels to include NC and levels which are not present in LOC_AGG_DT from kobo choices sheet:
+
+```{r, echo=T, warning=F, message=F}
+
+for(i in levels.lab$name_R){
+  LOC_AGG_DT[[i]] = fct_expand(factor(LOC_AGG_DT[[i]]),
+                               choices[list_name%in%levels.lab[name_R == i]$listname]$label)
+}
+```
+
+Reorder levels with kobo order :
+
+```{r, echo=T, warning=F, message=F}
+for(i in levels.lab$name_R){
+  LOC_AGG_DT[[i]] = fct_relevel(LOC_AGG_DT[[i]],
+                                choices[list_name%in%levels.lab[name_R == i]$listname]$label)
+}
+```
+
+
+
+\subsection{Create new variables}
+
+\subsubsection{D1 : groupe population present pdi retourne}
+
+```{r, echo=T, warning=F, message=F}
+# Cette nouvelle variable logique "D1_groupe_population_present_pdi_retourne", aura la valeur TRUE si les PDI est present (1) OU retourne
+LOC_AGG_DT[, D1_groupe_population_present_pdi_retournes := D1_groupe_population_present_pdi %in%c("Oui", "oui") | D1_groupe_population_present_retournes %in%c("Oui", "oui")]
+
+# Mettre en ordre les facteurs de la nouvelle variable"D1_groupe_population_present_pdi_retourne" créée precedement
+LOC_AGG_DT[, D1_groupe_population_present_pdi_retournes := factor(D1_groupe_population_present_pdi_retournes,levels = c(TRUE, FALSE))]
+```
+
+
+\subsubsection{F1 : temps pied structure sante sup 45 min}
+
+```{r, echo=T, warning=F, message=F}
+a = c("Entre plus de 1 heure et 2 heure",
+      "Entre plus de 2 heures et une demi-journée",
+      "Plus d'une demi-journée")
+
+# Garder toutes les reponses de la colonne qui correspondent aux elements de la variable a, et metter la valeur "Autre" pour les autres valeurs. CECI Dans le facteur pas dans la base de données aggregée
+LOC_AGG_DT[, F1_temps_pied_structure_sante_sup1h := fct_other(F1_temps_pied_structure_sante, keep = a)]
+
+# Garder toutes les reponses de la colonne qui ne correspondent pas aux elements de la variable a, et metter la valeur "Autre" pour celle qui correspondant aux élements ci-haut
+LOC_AGG_DT$F1_temps_pied_structure_sante_sup1h = fct_collapse(LOC_AGG_DT$F1_temps_pied_structure_sante_sup1h, x = a)
+
+levels(LOC_AGG_DT$F1_temps_pied_structure_sante_sup1h) = c(TRUE, FALSE)
+```
+
+
+\subsubsection{H1 : severite faim severe}
+
+```{r, echo=T, warning=F, message=F}
+LOC_AGG_DT[, H1_severite_faim_severe := fct_other(H1_severite_faim,
+                                                  keep =
+c("La faim était sévère, il y avait peu d’options pour réduire les difficultés d’accès à la nourriture"))]
+
+levels(LOC_AGG_DT$H1_severite_faim_severe) = c(TRUE, FALSE)
+```
+
+\subsubsection{L1 : type education primaire}
+
+```{r, echo=T, warning=F, message=F}
+LOC_AGG_DT[, L1_type_education_primaire_aucun := fct_other(
+  L1_type_education_primaire, keep = c("Aucune forme d'éducation (au-delà de l'éducation familiale)"))]
+
+levels(LOC_AGG_DT$L1_type_education_primaire_aucun) = c(TRUE, FALSE)
+```
+
+\subsection{Saving aggregated data by localities}
+
+```{r, echo=T, warning=F, message=F}
+writexl::write_xlsx(LOC_AGG_DT, AGGREGATED_DATASET)
+
+```
+
+ ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## 
+ #analyse
+
+\subsection{Compute count and proportion}
+
+\subsubsection{For aggregated data}
+
+The analysis process compute the proportion of localities by zone de sante which have reported something.
+
+```{r, echo=T, warning=F, message=F}
+# On enleve les colonnes sur lesquelles on ne calcule pas les effectifs et proportions, Version fevrier 2021 : ajout des variables C1_ pour la localisation de la population en brousse.
+varnames = setdiff(names(LOC_AGG_DT), c("month_collection",
+                                        "B_ki_coverage", "C_province", "C_zone_sante",
+                                        "C_aire_sante", "C_nom_localite_final",
+                                        "C_structure_sante_proche_localite",
+                                        "C_moyen_evaluation_localite",
+                                        "C_moyen_evaluation_localite_distance",
+                                        "C_moyen_evaluation_localite_distance_autre",
+                                        "C1_localisation_personnes_brousse",
+                                        "C1_zone_sante_personne_brousse",
+                                        "C1_nom_localite_proche_brousse",
+                                        "C1_nom_localite_proche_brousse_autre",
+                                        "C1_nom_structsante_proche_brousse"))
+
+assess_func <- function(x){
+ 
+  keycols <- c("C_province", "C_zone_sante", x)
+  setkeyv(LOC_AGG_DT, keycols)
+
+  a = LOC_AGG_DT[CJ(C_province, C_zone_sante, levels(LOC_AGG_DT[[x]]), unique = TRUE),
+                 .(n = .N), by = .EACHI]
+  
+  a = a[!is.na(a[[x]])]
+  
+  a = a[a[[x]] != "SL"]
+  
+  a = a[a[, .(N = sum(n)), by = c("C_province", "C_zone_sante")],
+        on=c("C_province", "C_zone_sante")]
+  
+  a[, prop := round(n/N*100,2)]
+  
+  a[, variable := x]
+  
+  return(a)
+  
+}
+
+FULL_ZS = lapply(varnames, function(x){
+  return(assess_func(x))})
+
+FULL_ZS = rbindlist(FULL_ZS, use.names=FALSE)
+
+names(FULL_ZS)[3] = "answer"
+```
+
+\subsubsection{For KI data}
+
+The analysis process compute the proportion of KI by zone de sante which have reported something.
+
+```{r, echo=T, warning=F, message=F}
+#varnames = c("A_profession", "B_statut_deplacement_IC", "C_moyen_evaluation_localite")
+
+varnames = NAMES_DT[data_by_ki == "data_by_ki"]$name_R
+
+KI = lapply(varnames, function(x){
+  
+  setkeyv(KI_CLEAN_DT, c("C_province", "C_zone_sante", x))
+  
+  a = KI_CLEAN_DT[CJ(C_province, C_zone_sante, KI_CLEAN_DT[[x]], unique = TRUE),
+                  .(n = .N), by = .EACHI]
+  
+  a = a[!is.na(a[[x]])]
+  
+  #a = a[a[[x]] != "SL"]
+  
+  a = a[a[, .(N = sum(n)), by = c("C_province", "C_zone_sante")],
+        on=c("C_province","C_zone_sante")]
+  
+  a[, prop := round(n/N*100,2)]
+  
+  a[, variable := x]
+  
+  a
+  
+})
+
+KI = rbindlist(KI, use.names=FALSE)
+
+names(KI)[3] = "answer"
+```
+
+\subsection{Merging data and adding zs coverage status}
+```{r, echo=T, warning=F, message=F}
+
+FULL_ZS_bind = rbind(FULL_ZS, KI)
+
+ZS$C_zone_sante <- ZS$zs
+
+names(ZS)[names(ZS) == month_collection] <- "cover_status"
+
+ZS_coverage <- ZS%>%select(C_zone_sante, cover_status)
+
+FULL_ZS_merged <- dplyr::left_join(FULL_ZS_bind, ZS_coverage, by="C_zone_sante")
+
+FULL_ZS <- FULL_ZS_merged
+```
+
+\subsection{Order and format before saving}
+
+```{r, echo=T, warning=F, message=F}
+FULL_ZS = FULL_ZS[, .(variable, answer, C_province, C_zone_sante, cover_status, n, N, prop)]
+
+FULL_ZS$answer = enc2utf8(as.character(FULL_ZS$answer))
+
+FULL_ZS$variable = enc2utf8(as.character(FULL_ZS$variable))
+
+writexl::write_xlsx(FULL_ZS, ANALYSED_ZS)
+
+```
+
+\subsection{Result by province for all zs}
+
+```{r, echo=T, warning=F, message=F}
+FULL_P = FULL_ZS[, .(n = sum(n)), by=.(C_province, variable, answer)]
+
+FULL_P = FULL_P[FULL_ZS[, .(N = sum(n)), by=.(C_province, variable)], on = .(C_province, variable)]
+
+FULL_P[, prop := round(n/N*100,2)]
+
+levels(FULL_P$C_province) <- sub("nord_kivu", "Nord-Kivu", levels(FULL_P$C_province))
+levels(FULL_P$C_province) <- sub("sud_kivu", "Sud-Kivu", levels(FULL_P$C_province))
+levels(FULL_P$C_province) <- sub("tanganyika", "Tanganyika", levels(FULL_P$C_province))
+levels(FULL_P$C_province) <- sub("ituri", "Ituri", levels(FULL_P$C_province))
+
+writexl::write_xlsx(FULL_P, ANALYSED_FULL_P)
+
+```
+
+
+\section{Formatting for InDesign}
+
+\subsection{Text modifications for tiny labelling}
+
+```{r, echo=T, warning=F, message=F}
+TXT_LAB <- read_excel(TXT_LAB)
+TXT_LAB = as.data.table(TXT_LAB)
+
+for(i in 1:nrow(TXT_LAB)){
+  FULL_ZS[answer %in% TXT_LAB$Label_R[[i]]]$answer = TXT_LAB$Label_InDesign[[i]]
+}
+FULL_ZS$answer = gsub(" / ", "/", FULL_ZS$answer)
+FULL_ZS$answer = gsub("/ ", "/", FULL_ZS$answer)
+FULL_ZS$answer = gsub(" /", "/", FULL_ZS$answer)
+
+for(i in 1:nrow(TXT_LAB)){
+  FULL_P[answer %in% TXT_LAB$Label_R[[i]]]$answer = TXT_LAB$Label_InDesign[[i]]
+}
+FULL_P$answer = gsub(" / ", "/", FULL_P$answer)
+FULL_P$answer = gsub("/ ", "/", FULL_P$answer)
+FULL_P$answer = gsub(" /", "/", FULL_P$answer)
+```
+
+
+\subsection{Results by province}
+
+Le filtre N > 3 est utilisé pour ne pas reporter sur les zones de santé où moins de 4 localités ont été évalées. Il ne s'applique donc principalement qu'au Top3 ou Top1 des zones de santé.
+
+```{r, echo=T, warning=F, message=F}
+COV_ZS = FULL_ZS[cover_status %in% "X" & N > 3]
+COV_ZS$cover_status = NULL
+```
+
+
+\subsubsection{Proportions for single question with specific levels}
+
+S'applique aux variables multinomiales.
+Reporte le pourcentage de localités pour chaque modalité de la variable ainsi que les effectifs concernés et l'effectif total.
+
+
+```{r, echo=T, warning=F, message=F}
+varnames = NAMES_DT[prov_multinom == "All"]$name_R
+
+All_Multinom = lapply(varnames, function(x){
+  
+  if(x %in% FULL_P$variable == TRUE){
+    
+a = FULL_P[variable %in% x]
+  
+  a$prop = round(a$prop, 0)
+  
+  top = nlevels(factor(a$answer))
+  
+  a = dcast(a, C_province ~ ., value.var = c("answer","prop","n"), fun=list)
+  
+  a = a[, rn := .I][, c(transpose(answer),
+                        transpose(prop),
+                        transpose(n)), by = .(C_province, rn)][,-c("rn")]
+  
+  names(a)[-1] = paste(rep(c("Name","Per","Nb"), each=top), rep(x,top*3), 1:top, sep="_")
+  
+  a 
+  }
+  
+  
+})
+
+```
+
+\subsubsection{Proportions for single question with yes, true, oui levels}
+
+S'applique aux variables
+Reporte le pourcentage ainsi que l'effectif concerné et l'effectif total de localités ayant répondu "oui", TRUE ou "1".
+
+```{r, echo=T, warning=F, message=F}
+top = 1 
+
+# Version fevrier 2021 : la Q5.3 a été enlevée raison pour la quelle la variable "H2_impact_conflits_pillages_acces_nourriture" est absent dans le vecteur
+varnames = c("D1_groupe_population_present_pdi_retournes",
+             # "F1_lieu_de_soin_hors_structure",
+             "F1_temps_pied_structure_sante_sup1h",
+             NAMES_DT[prov_multinom == "Yes"]$name_R)
+
+Yes_Multinom = lapply(varnames, function(x){
+  
+  a = FULL_P[variable %in% x & answer %in% c(T, "1", "oui","Oui")]
+  
+  a$prop = round(a$prop, 0)
+  
+  a = a[, .(C_province, answer, prop, n)]
+  
+  names(a)[-1] = paste(rep(c("Name","Per","Nb"), each=top), rep(x,top*3), 1:top, sep="_")
+  
+  a
+  
+})
+```
+
+\subsubsection{Proportions for single question with no, false, non levels}
+
+S'applique aux variables multinomiales.
+Reporte le pourcentage ainsi que l'effectif concerné et l'effectif total de localités ayant répondu "non", FALSE ou "0".
+
+
+```{r, echo=T, warning=F, message=F}
+top = 1 
+
+varnames = NAMES_DT[prov_multinom == "No"]$name_R
+
+#x = varnames
+
+No_Multinom = lapply(varnames, function(x){
+  
+  a = FULL_P[variable %in% x & answer %in% c(F, "0", "non","Non")]
+  
+  a$prop = round(a$prop, 0)
+  
+  a = a[, .(C_province, answer, prop, n)]
+  
+  names(a)[-1] = paste(rep(c("Name","Per","Nb"), each=top), rep(x,top*3), 1:top, sep="_")
+  
+  a
+  
+})
+```
+
+\subsubsection{Top 3 des levels for single question}
+
+S'applique aux variables multinomiales.
+Reporte, dans l'ordre décroissant, les trois modalités ayant les plus forts pourcentages de localités, lesdits pourcentage ainsi que les effectifs concernés et l'effectif total.
+
+
+```{r, echo=T, warning=F, message=F}
+top = 3
+
+varnames = NAMES_DT[prov_multinom == "Top3"]$name_R
+
+
+Top3_Multinom = lapply(varnames, function(x){
+
+ a = FULL_P[variable %in% x][order(-prop)]
+ #a = FULL_P[variable %in% varnames][order(-prop)]
+  
+ if (nrow(a) > 0){
+  a = a[, lapply(.SD, function(x){x[prop %in% unique(prop)[1:top]]}), by=C_province]
+  
+  a$prop = round(a$prop, 0)
+  
+  a[, grp := match(prop, unique(prop)), by=.(C_province)]
+  
+  names(a) = c("C_province","variable","answer","Nb","Tot","Per","grp")
+  
+  a = dcast(a, C_province ~ grp, value.var = c("answer","Per","Nb"),
+            fun=function(x){list(unique(x))})
+  
+  names(a)[-1] = gsub("answer", paste("Name_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Per", paste("Per_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Nb", paste("Nb_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Tot", paste("Tot_", x, sep=""), names(a)[-1])
+  
+  a
+}
+  
+})
+```
+
+\subsubsection{Top 3 for multiple questions with 0/1 levels}
+
+S'applique à un groupe de variables binomiales 0/1.
+Reporte, dans l'ordre décroissant, les trois variables ayant les plus forts pourcentages de localités ayant répondu "1", lesdits pourcentage ainsi que les effectifs concernés et l'effectif total.
+
+
+```{r, echo=T, warning=F, message=F}
+# Ajouter les select multiple pour recuperer le bloc des variables liées à chaque pattern de select multiple, pour aider à recuperer les 3 premiers dans les blocs selon le pattern mis en critère; seulement pour les variables select_multiple où on veut ressortir les Top 3
+# Version Fevrier ajout de quelques variables select_multiple de top3_group
+top = 3
+
+#version novembre 22
+#retrieve info for Top3_GroupBinom. Remind that in the fichier d'aggregation Top3_GroupBinom must be included not for all options, but just at the beginning in the non option line
+#example: for G6_enfants_activites_economiques_type_filles and not for G6_enfants_activites_economiques_type_filles_enfants_travail_champs
+
+#retrieve info
+varlabels = NAMES_DT[prov_multinom == "Top3_GroupBinom"]$name_R
+
+# #they all to be select multiples
+# varlabels = varlabels[varlabels%in%questions[grepl("select_multiple", questions$type)]$name]
+
+#we have an error where the label variable is actually not analysed since it has all NAs
+#for this reason we filter those out when in the KI dataset all values are NAs
+
+varlabels = varlabels[varlabels%in%names(Filter(function(x)!all(is.na(x)), KI_CLEAN_DT))]
+varlabels = paste(varlabels, "_", sep="")
+
+#make list of all options per question
+varnames <- list()
+ for(i in varlabels){
+  output<- names(LOC_AGG_DT[ , .SD, .SDcols = patterns(i)])
+  varnames[[i]]<- output
+ }
+
+#remove names
+names(varnames) <- NULL
+
+#remove _autre options
+for(i in 1:length(varnames)){
+  output<- varnames[[i]][!grepl("_autre", varnames[[i]])]
+  varnames[[i]]<- output
+}
+
+# #they have to be in Full_p
+for(i in 1:length(varnames)){
+  output<- varnames[[i]][ varnames[[i]]%in%FULL_P$variable]
+  varnames[[i]]<- output
+}
+
+varnames<- varnames[c(1:3)]
+
+ Top3_GroupBinom= lapply(1:length(varnames), function(x){
+  # Version fevrier 2021 :   a = FULL_P[variable %in% varnames[[x]] & answer %in% c("1", TRUE)][order(-prop)]
+
+  a = FULL_P[variable %in% varnames[[x]] & answer %in% c("1", TRUE)][order(-prop)]
+  
+  a = a[, lapply(.SD, function(x){x[prop %in% unique(prop)[1:top]]}), by=C_province]
+  
+  a$prop = round(a$prop, 0)
+  
+  a$answer = gsub(varlabels[x], "", a$variable)
+  a$variable = varlabels[x]
+  
+  a[, grp := match(prop, unique(prop)), by=.(C_province)]
+  
+  a = dcast(a, C_province ~ grp, value.var = c("answer","prop","n"),
+            fun=function(x){list(unique(x))})
+  
+  names(a)[-1] = paste(rep(c("Name","Per","Nb"), each=top), rep(varlabels[x],top*3), 1:top, sep="_")
+  
+  a
+  
+})
+```
+
+\subsubsection{Top3 des zones de santé pour les réponses "oui"}
+
+S'applique aux variables oui/non, 0/1 ou TRUE/FALSE.
+Reporte, dans l'ordre décroissant, les trois ZS ayant les plus forts pourcentages de localités ayant répondu "oui", "1" ou "TRUE", lesdits pourcentage ainsi que les effectifs concernés et l'effectif total.
+
+#the second part for some reason must be run line by line
+```{r, echo=T, warning=F, message=F}
+top = 3
+
+# Les instructions justes pour tester les elements qui sont dans l'objet liste de vecteurs, regarder les elements qui retourne un 0
+
+#where this check == 0 variables have to be taken oou otherwise the function below won't work
+
+# sapply(varnames, function(x){x %in% COV_ZS$variable})
+sapply(varnames, function(x){nrow(COV_ZS[variable %in% x & answer %in% c(T, "1", "Oui","oui")][order(-prop, -N)])})
+varnames = c("F1_temps_pied_structure_sante_sup1h",
+             "H1_severite_faim_severe",
+             "L1_type_education_primaire_aucun",                
+             NAMES_DT[prov_top3_zs == "Top3_zs_T"]$name_R
+             )
+
+#let's take out variables based on the previou check
+to_be_taken_out<- sapply(varnames, function(x){nrow(COV_ZS[variable %in% x & answer %in% c(T, "1", "Oui","oui")][order(-prop, -N)])})[sapply(varnames, function(x){nrow(COV_ZS[variable %in% x & answer %in% c(T, "1", "Oui","oui")][order(-prop, -N)])})==0]
+
+varnames= varnames[varnames%!in%NAMES_DT[prov_top3_zs == "Top3_zs_T"]$name_R[NAMES_DT[prov_top3_zs == "Top3_zs_T"]$name_R%in%names(to_be_taken_out)]]
+
+Top3_ZS_BinomV = lapply(varnames, function(x){
+  
+  a = COV_ZS[variable %in% x & answer %in% c(TRUE, "1", "Oui","oui")][order(-prop, -N)]
+  
+ a = a[, lapply(.SD, function(x){x[prop %in% unique(prop)[1:top]]}), by=C_province]
+  
+  a$prop = round(a$prop, 0)
+  
+  a[, grp := match(prop, unique(prop)), by=.(C_province)]
+  
+  names(a) = c("C_province","variable","answer","C_zone_sante","Nb","Tot","Per","grp")
+  
+  a = dcast(a, C_province ~ grp, value.var = c("C_zone_sante","Per","Nb","Tot"),
+            fun=function(x){list(unique(x))})
+  
+  names(a)[-1] = gsub("C_zone_sante", paste("Name_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Per", paste("Per_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Nb", paste("Nb_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Tot", paste("Tot_", x, sep=""), names(a)[-1])
+  a
+})
+```
+
+\subsubsection{Top3 des zones de santé pour les réponses "non"}
+
+S'applique aux variables oui/non, 0/1 ou TRUE/FALSE.
+Reporte, dans l'ordre décroissant, les trois ZS ayant les plus forts pourcentages de localités ayant répondu "non", "0" ou "FALSE", lesdits pourcentage ainsi que les effectifs concernés et l'effectif total.
+
+
+```{r, echo=T, warning=F, message=F}
+varnames = NAMES_DT[prov_top3_zs == "Top3_zs_F"]$name_R
+
+top = 3
+
+Top3_ZS_BinomF = lapply(varnames, function(x){
+  
+  a = COV_ZS[variable %in% x & answer %in% c(F, "0", "Non","non")][order(-prop, -N)]
+  
+  a = a[, lapply(.SD, function(x){x[prop %in% unique(prop)[1:top]]}), by=C_province]
+  
+  a$prop = round(a$prop, 0)
+  
+  a[, grp := match(prop, unique(prop)), by=.(C_province)]
+  
+  names(a) = c("C_province","variable","answer","C_zone_sante","Nb","Tot","Per","grp")
+  
+  a = dcast(a, C_province ~ grp, value.var = c("C_zone_sante","Per","Nb","Tot"),
+            fun=function(x){list(unique(x))})
+  
+  names(a)[-1] = gsub("C_zone_sante", paste("Name_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Per", paste("Per_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Nb", paste("Nb_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Tot", paste("Tot_", x, sep=""), names(a)[-1])
+  a
+})
+```
+
+\subsubsection{Top3 des zones de santé ayant reporté le Top1 de la C_province}
+
+S'applique aux variables multinomiales.
+Reporte, dans l'ordre décroissant, les trois ZS ayant reporté la modalité ayant le plus fort pourcentage (Top1) de la C_province, lesdits pourcentage ainsi que les effectifs concernés et l'effectif total.
+
+
+```{r, echo=T, warning=F, message=F}
+top = 3
+
+## there are also here some variable that do not appear in the analysis and make the script break, so let's filter them out
+varnames = NAMES_DT[prov_top3_zs == "Top3_zs_Top1_prov"]$name_R
+
+varnames =varnames[varnames%in%COV_ZS$variable]
+#x = varnames[2]
+
+Top3_ZS_Top1_P = sapply(varnames, function(x){
+  
+  a = FULL_P[variable == x][order(-prop)]
+  
+  a = a[answer != "NC"]
+  
+  a = a[, .(variable = variable[1], answer = answer[1]), by=C_province]
+  
+  a = COV_ZS[a, on=c("C_province","variable","answer")][order(C_province, -prop, -N)]
+  
+  a = a[, lapply(.SD, function(x){x[prop %in% unique(prop)[1:top]]}), by=C_province]
+  
+  a$prop = round(a$prop, 0)
+  
+  a[, grp := match(prop, unique(prop)), by=.(C_province)]
+  
+  names(a) = c("C_province","variable","answer","C_zone_sante","Nb","Tot","Per","grp")
+  
+  a = dcast(a, C_province ~ grp, value.var = c("C_zone_sante","Per","Nb","Tot"),
+            fun=function(x){list(unique(x))})
+ 
+  names(a)[-1] = gsub("C_zone_sante", paste("Name_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Per", paste("Per_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Nb", paste("Nb_", x, sep=""), names(a)[-1])
+  names(a)[-1] = gsub("Tot", paste("Tot_", x, sep=""), names(a)[-1])
+  a
+  
+})
+```
+
+\subsubsection{Add narrative information}
+
+Nombre d'enquêtes, nombre d'IC sur les ZS totales :
+
+```{r, echo=T, warning=F, message=F}
+LOC_AGG_DT$B_ki_coverage = as.numeric(as.character(LOC_AGG_DT$B_ki_coverage))
+All_Nb = list(LOC_AGG_DT[, .(All_ki = sum(B_ki_coverage), All_loc = .N), by = .(C_province)])
+```
+
+Nombre d'enquêtes, nombre d'IC sur les ZS couvertes :
+
+```{r, echo=T, warning=F, message=F}
+a = unique(FULL_ZS[cover_status == "X"]$C_zone_sante)
+
+Cov_Nb = list(LOC_AGG_DT[C_zone_sante %in% a, .(Cov_ki = sum(B_ki_coverage), Cov_loc = .N), by = .(C_province)])
+
+#KI_CLEAN_DT[C_zone_sante %in% ZS[`202009`== "X"]$zs, .N, by=.(C_province)]
+```
+
+
+Nombre de ZS totales et couvertes :
+
+```{r, echo=T, warning=F, message=F}
+Nb_ZS = unique(FULL_ZS[, .(C_province, C_zone_sante, cover_status)])
+Nb_ZS$cover_status = factor(Nb_ZS$cover_status)
+
+Nb_ZS = dcast(Nb_ZS, C_province ~ cover_status, fun=length)
+names(Nb_ZS)[-1] = c("Nb_ZS_uncov","Nb_ZS_cov")
+Nb_ZS[, Tot := Nb_ZS_uncov + Nb_ZS_cov]
+Nb_ZS$Nb_ZS_uncov = NULL
+Nb_ZS = list(Nb_ZS)
+```
+
+\subsubsection{Merge all together and save}
+
+```{r, echo=T, warning=F, message=F}
+#version 11-2022
+#for some reason it doesnt merge together the last 3 elements, so lets keep them separate and bind them later
+
+Analyse = c(
+  All_Multinom,
+            Yes_Multinom,
+            No_Multinom,
+            Top3_Multinom,
+            Top3_GroupBinom,
+         Top3_ZS_BinomV,
+         Top3_ZS_BinomF,
+           Top3_ZS_Top1_P
+            # All_Nb,
+            # Cov_Nb,
+            # Nb_ZS
+  )
+Analyse1 = c(
+
+            All_Nb,
+            Cov_Nb,
+            Nb_ZS)
+```
+
+Deleting empty element :
+
+```{r, echo=T, warning=F, message=F}
+Analyse = Filter(nrow, Analyse)
+Analyse <- Analyse[!sapply(Analyse,is.null)]
+Analyse<- Analyse %>% discard(is.null)
+
+Analyse1 = Filter(nrow, Analyse1)
+Analyse1 <- Analyse1[!sapply(Analyse1,is.null)]
+Analyse1<- Analyse1 %>% discard(is.null)
+
+```
+
+Merging all element for InDesign :
+
+```{r, echo=T, warning=F, message=F}
+
+a = Analyse[[1]]
+
+for(i in 2:length(Analyse)){
+  if(NROW(Analyse[[i]]) >=1 ){ a =Analyse[[i]][a, on ="C_province"]}
+  }
+Analyse = a
+
+a = Analyse1[[1]]
+
+for(i in 2:length(Analyse1)){
+  if(NROW(Analyse1[[i]]) >=1 ){ a =Analyse1[[i]][a, on ="C_province"]}
+  }
+Analyse1 = a
+
+#version 11-2022, bind them together and add month of research
+Analyse<- left_join(Analyse1%>%mutate(A_cycle_de_recherche = month_collection), Analyse, c("C_province"))
+```
+
+We rename some labels here :
+
+```{r, echo=T, warning=F, message=F}
+LabToChange = sapply(Analyse, function(x){any(x %in% TXT_LAB$Label_R)})
+
+LabToChange = names(LabToChange[LabToChange == T])
+
+for(i in 1:length(LabToChange)){
+  for(j in 1:nrow(TXT_LAB)){
+Analyse[[LabToChange[i]]][Analyse[[LabToChange[i]]] %in% TXT_LAB$Label_R[[j]]] = TXT_LAB$Label_InDesign[[j]] 
+}}
+```
+
+A trick to allow the writing of empty list with fwrite :
+
+```{r, echo=T, warning=F, message=F}
+b = sapply(Analyse[2], function(x){is.null(unlist(x))})
+b = b[b == T]
+
+  for(i in names(b)){ Analyse[2][[i]] = "" }
+
+
+#if(length(b)>=1){
+ # for(i in names(b)){ Analyse[2][[i]] = "" }
+#}
+
+for (i in 1 :length(Analyse)){
+    for (j in 1 :length(Analyse[[i]])) {
+          if(NROW(Analyse[[i]][[j]])>=1){
+            Analyse[[i]][[j]]<- Analyse[[i]][[j]]
+          }else{
+            Analyse[[i]][[j]]<- "N/A"
+    }
+    }
+  }
+
+
+
+fwrite(Analyse, INDESIGN_P, sep=";", sep2 = c("",",",""))
+
+```
+
+
+\section{Evolution from last version...}
+
+Have been recoded :
+
+* The relevels of variables,
+* name variables in analysis section have been recovered from file,
+* name variables in formatting section have been recovered from file except for Top3_GroupBinom,
+* any skip logic.
+
+
+\pagebreak
+
+\addcontentsline{toc}{section}{References}
